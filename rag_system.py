@@ -3,7 +3,7 @@
 import chromadb
 from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
-from typing import List, Dict
+from typing import List, Dict, Optional
 from datetime import datetime
 import os
 
@@ -34,13 +34,14 @@ class DociaRAG:
             )
             print("✅ Nueva colección creada")
     
-    def add_document(self, doc_data: Dict, metadata: Dict) -> str:
+    def add_document(self, doc_data: Dict, metadata: Dict, uploaded_by: str = "sistema") -> str:
         """
         Añade un documento completo a la base vectorial
         
         Args:
             doc_data: dict con 'chunks' del DocumentProcessor
             metadata: dict con title, type, year, specialty, etc.
+            uploaded_by: nombre del usuario que sube el documento
         
         Returns:
             doc_id: identificador único del documento
@@ -71,7 +72,8 @@ class DociaRAG:
                 "page": str(chunk.get('page', 0)),
                 "section": chunk.get('section', 'Sin sección'),
                 "tokens": str(chunk.get('tokens', 0)),
-                "upload_date": datetime.now().isoformat()
+                "upload_date": datetime.now().isoformat(),
+                "uploaded_by": uploaded_by  # NUEVO: quién subió el documento
             })
             
             ids.append(chunk_id)
@@ -109,7 +111,8 @@ class DociaRAG:
         self, 
         query: str, 
         n_results: int = 5,
-        filters: Dict = None
+        filters: Optional[Dict] = None,
+        user_id: Optional[str] = None  # NUEVO: filtrar por usuario
     ) -> List[Dict]:
         """
         Busca fragmentos relevantes en la base de datos
@@ -118,6 +121,7 @@ class DociaRAG:
             query: pregunta del usuario
             n_results: cuántos resultados devolver (máx)
             filters: dict con filtros, ej: {"specialty": "cardiologia"}
+            user_id: filtrar solo documentos de este usuario (None = todos)
         
         Returns:
             Lista de diccionarios con los chunks más relevantes
@@ -125,14 +129,18 @@ class DociaRAG:
         # Generar embedding de la query
         query_embedding = self.embedding_model.encode(query).tolist()
         
-        # Buscar en Chroma
-        where_filter = filters if filters else None
+        # Construir filtros
+        where_filter = filters.copy() if filters else {}
+        
+        # Agregar filtro de usuario si se proporciona
+        if user_id:
+            where_filter["uploaded_by"] = user_id
         
         try:
             results = self.collection.query(
                 query_embeddings=[query_embedding],
                 n_results=n_results,
-                where=where_filter
+                where=where_filter if where_filter else None
             )
         except Exception as e:
             print(f"⚠️ Error en búsqueda: {e}")
@@ -169,22 +177,57 @@ class DociaRAG:
         else:
             return 2
     
-    def get_collection_stats(self) -> Dict:
-        """Estadísticas de la colección"""
+    def get_collection_stats(self, user_id: Optional[str] = None) -> Dict:
+        """
+        Estadísticas de la colección
+        
+        Args:
+            user_id: si se proporciona, solo stats de ese usuario
+        """
         count = self.collection.count()
-        unique_docs = set()
         
-        if count > 0:
-            try:
-                all_metadata = self.collection.get()['metadatas']
-                unique_docs = set([m.get('doc_id', 'unknown') for m in all_metadata])
-            except:
-                pass
+        if count == 0:
+            return {
+                "total_chunks": 0,
+                "unique_docs": 0,
+                "by_user": {}
+            }
         
-        return {
-            "total_chunks": count,
-            "unique_docs": len(unique_docs)
-        }
+        try:
+            all_metadata = self.collection.get()['metadatas']
+            
+            # Si hay filtro de usuario
+            if user_id:
+                user_metadata = [m for m in all_metadata if m.get('uploaded_by') == user_id]
+                unique_docs = set([m.get('doc_id', 'unknown') for m in user_metadata])
+                
+                return {
+                    "total_chunks": len(user_metadata),
+                    "unique_docs": len(unique_docs)
+                }
+            
+            # Stats generales
+            unique_docs = set([m.get('doc_id', 'unknown') for m in all_metadata])
+            
+            # Contar por usuario
+            by_user = {}
+            for m in all_metadata:
+                user = m.get('uploaded_by', 'sistema')
+                by_user[user] = by_user.get(user, 0) + 1
+            
+            return {
+                "total_chunks": count,
+                "unique_docs": len(unique_docs),
+                "by_user": by_user
+            }
+            
+        except Exception as e:
+            print(f"⚠️ Error obteniendo stats: {e}")
+            return {
+                "total_chunks": count,
+                "unique_docs": 0,
+                "by_user": {}
+            }
     
     def delete_document(self, doc_id: str) -> bool:
         """Elimina un documento completo"""
@@ -205,3 +248,38 @@ class DociaRAG:
         except Exception as e:
             print(f"❌ Error al eliminar: {e}")
             return False
+    
+    def get_user_documents(self, user_id: str) -> List[Dict]:
+        """
+        Obtiene lista de documentos únicos de un usuario
+        
+        Returns:
+            Lista de diccionarios con info de cada documento
+        """
+        try:
+            results = self.collection.get(
+                where={"uploaded_by": user_id}
+            )
+            
+            if not results['metadatas']:
+                return []
+            
+            # Agrupar por doc_id
+            docs = {}
+            for meta in results['metadatas']:
+                doc_id = meta.get('doc_id')
+                if doc_id and doc_id not in docs:
+                    docs[doc_id] = {
+                        'doc_id': doc_id,
+                        'title': meta.get('title', 'Sin título'),
+                        'type': meta.get('type', 'desconocido'),
+                        'specialty': meta.get('specialty', 'general'),
+                        'year': meta.get('year', 'N/A'),
+                        'upload_date': meta.get('upload_date', 'N/A')
+                    }
+            
+            return list(docs.values())
+            
+        except Exception as e:
+            print(f"⚠️ Error obteniendo documentos de usuario: {e}")
+            return []

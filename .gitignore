@@ -11,6 +11,9 @@ env/
 # Base de datos vectorial
 chroma_db/
 
+# Base de datos de correcciones
+corrections.json
+
 # Python
 __pycache__/
 *.pyc
@@ -35,3 +38,6 @@ desktop.ini
 temp_*
 *.tmp
 *.log
+
+# Test
+test_gemini.py

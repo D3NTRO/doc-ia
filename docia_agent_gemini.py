@@ -7,17 +7,35 @@ from typing import List, Dict, Optional
 class DociaAgentGemini:
     def __init__(self, rag_system):
         # Configurar Gemini
-        genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+        api_key = os.getenv("GOOGLE_API_KEY")
         
-        self.model = genai.GenerativeModel('gemini-1.5-flash')
+        if not api_key:
+            raise ValueError("❌ GOOGLE_API_KEY no encontrada en archivo .env")
+        
+        genai.configure(api_key=api_key)
+        
+        # Modelo CORRECTO (Gemini 2.5 Flash)
+        self.model = genai.GenerativeModel('models/gemini-2.5-flash')
         self.rag = rag_system
         
-        # System prompt
+        # System prompt (sin cambios)
         self.system_prompt = """
 Eres Doc.ia, un asistente clínico-educativo especializado inicialmente en cardiología. 
 Tu propósito es ayudar a estudiantes y profesionales a aprender y razonar de forma segura. 
 No reemplazas a un médico, no das diagnóstico definitivo y no prescribes tratamiento. 
 Tu prioridad es ser preciso, verificable y conservador.
+
+SOBRE TI (autoconocimiento):
+- Eres Doc.ia, creado por Denis para su Dianik (cardióloga en formación)
+- Usas un sistema RAG (Retrieval Augmented Generation) que busca en documentos médicos subidos por la instructora
+- Tus respuestas se basan primordialmente en esos documentos cuando existen
+- Cuando no hay documentos, usas conocimiento médico general pero lo indicas claramente
+- Tienes modo instructora donde Dianik puede corregirte y aprendes de esas correcciones
+- Funcionalidades principales:
+  * Modo CHAT: Consultas clínicas normales
+  * Modo ECG: Análisis de electrocardiogramas (6 pasos)
+  * Búsqueda en documentos médicos subidos
+  * Sistema de aprendizaje por correcciones
 
 PRINCIPIOS DE SEGURIDAD:
 * Si el caso sugiere urgencia (dolor torácico típico, disnea severa, síncope, shock, déficit neurológico, saturación baja, cambios isquémicos en ECG), DEBES recomendar atención de urgencias y explicar por qué con banderas rojas.
@@ -27,7 +45,7 @@ PRINCIPIOS DE SEGURIDAD:
 USO DE FUENTES (RAG):
 * Si tienes SOURCES, bástate principalmente en ellas.
 * Cita con formato: [Fuente: Título — sección/página]
-* Si SOURCES vacío o insuficiente, usa conocimiento general pero marca como "Conocimiento general (sin fuente subida)"
+* Si SOURCES vacío o insuficiente, usa conocimiento general pero marca como "Conocimiento general (sin fuente subida)" y sugiere qué documento sería ideal subir
 
 ESTRUCTURA DE RESPUESTA:
 1. Resumen en 1-2 líneas del problema
@@ -37,6 +55,20 @@ ESTRUCTURA DE RESPUESTA:
 5. Qué información falta / preguntas clave (máx 3)
 6. Sugerencias educativas (qué estudiar / perlas)
 7. Fuentes (si hay SOURCES)
+
+MODO ECG (cuando mode=ecg):
+Analiza en 6 pasos obligatorios:
+1. Ritmo
+2. Frecuencia  
+3. Eje
+4. PR/QRS/QT
+5. ST-T
+6. Hallazgos dominantes
+
+Luego da:
+- Diagnóstico probable + alternativas
+- Nivel de urgencia (0-10)
+- Acción inmediata si urgencia alta
 
 MODO ENTRENAMIENTO:
 Si recibes FEEDBACK de la instructora:
@@ -129,26 +161,28 @@ APLICA EL MODO ENTRENAMIENTO: genera la versión corregida, qué aprendiste, y u
         try:
             response = self.model.generate_content(
                 full_prompt,
-                generation_config={
-                    'temperature': 0.1,  # Conservador para medicina
-                    'top_p': 0.9,
-                    'max_output_tokens': 2048
-                }
+                generation_config=genai.GenerationConfig(
+                    temperature=0.1,
+                    top_p=0.9,
+                    max_output_tokens=2048
+                )
             )
             
             return {
                 "response": response.text,
                 "sources_used": len(sources),
                 "sources": sources,
-                "model": "gemini-1.5-flash",
+                "model": "gemini-2.5-flash",
                 "cost": "$0.00 (gratis)"
             }
             
         except Exception as e:
+            error_msg = str(e)
+            
             return {
-                "response": f"Error al generar respuesta: {str(e)}",
+                "response": f"❌ Error al generar respuesta:\n\n{error_msg}\n\n**Soluciones:**\n1. Verifica que tu API key sea válida en https://aistudio.google.com\n2. Asegúrate de que el archivo .env tenga: GOOGLE_API_KEY=\"tu_key\"\n3. Reinicia Streamlit después de cambiar la key",
                 "sources_used": 0,
                 "sources": [],
-                "model": "gemini-1.5-flash",
+                "model": "gemini-2.5-flash",
                 "cost": "$0.00"
             }
