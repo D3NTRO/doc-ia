@@ -1,0 +1,37 @@
+# Entorno virtual
+docia_env/
+venv/
+env/
+
+# Variables de entorno (API KEY - NUNCA SUBIR)
+.env
+.env.local
+.env.*.local
+
+# Base de datos vectorial
+chroma_db/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Sistema
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# VSCode
+.vscode/
+
+# Temporales
+temp_*
+*.tmp
+*.log
